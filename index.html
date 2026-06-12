@@ -201,6 +201,8 @@
     footer .ft-sub { font-size:12px; margin-bottom:8px; }
     footer .ft-copy { font-size:11px; color:rgba(255,255,255,.4); }
   </style>
+  <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js"></script>
 </head>
 <body>
 
@@ -485,6 +487,20 @@
 </footer>
 
 <script>
+// ─── FIREBASE INIT ────────────────────────────────────────────────────────────
+const firebaseConfig = {
+  apiKey: "AIzaSyC6I3SxpaDq4NurpfLjxoFkX_dGYJnSZ4g",
+  authDomain: "grade3-amethyst-teacher-flora.firebaseapp.com",
+  projectId: "grade3-amethyst-teacher-flora",
+  storageBucket: "grade3-amethyst-teacher-flora.firebasestorage.app",
+  messagingSenderId: "183478703411",
+  appId: "1:183478703411:web:d60e018b065130c5fc1a46",
+  measurementId: "G-PMHP03EQ9Z"
+};
+firebase.initializeApp(firebaseConfig);
+const db = firebase.firestore();
+const annCol = db.collection("announcements");
+
 // ─── DATA ────────────────────────────────────────────────────────────────────
 const TEACHER_USER = "teacher";
 const TEACHER_PASS = "Amethyst@2026";
@@ -512,16 +528,30 @@ let adminOpen   = false;
 
 // ─── INIT ────────────────────────────────────────────────────────────────────
 function loadData() {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    announcements = raw ? JSON.parse(raw) : DEFAULT_ANN;
-  } catch { announcements = DEFAULT_ANN; }
-  if (!localStorage.getItem(STORAGE_KEY)) saveData();
-  renderAll();
-}
+  // Show loading state
+  document.getElementById('annList').innerHTML = '<p style="text-align:center;padding:40px;color:#6D28D9;font-family:Inter,sans-serif;">⏳ Loading announcements...</p>';
+  document.getElementById('homeAnnList').innerHTML = '<p style="text-align:center;color:#6D28D9;font-family:Inter,sans-serif;">⏳ Loading...</p>';
 
-function saveData() {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(announcements));
+  // Listen for real-time updates from Firebase
+  annCol.orderBy("id", "desc").onSnapshot((snapshot) => {
+    if (snapshot.empty) {
+      // First time: seed default announcements
+      const batch = db.batch();
+      DEFAULT_ANN.forEach(ann => {
+        const ref = annCol.doc();
+        batch.set(ref, ann);
+      });
+      batch.commit();
+    } else {
+      announcements = snapshot.docs.map(doc => ({ ...doc.data(), docId: doc.id }));
+      renderAll();
+    }
+  }, (err) => {
+    console.error("Firestore error:", err);
+    // Fallback to defaults if offline
+    announcements = DEFAULT_ANN;
+    renderAll();
+  });
 }
 
 function renderAll() {
@@ -605,7 +635,7 @@ function toggleAdminPanel() {
 }
 
 // ─── ANNOUNCEMENTS ────────────────────────────────────────────────────────────
-function postAnnouncement() {
+async function postAnnouncement() {
   const title   = document.getElementById('newTitle').value.trim();
   const content = document.getElementById('newContent').value.trim();
   if (!title || !content) { alert('Please fill in the title and content.'); return; }
@@ -619,28 +649,35 @@ function postAnnouncement() {
     linkUrl:   document.getElementById('newLinkUrl').value.trim() || null,
     linkTitle: document.getElementById('newLinkTitle').value.trim() || null,
   };
-  announcements.unshift(ann);
-  saveData();
-  document.getElementById('newTitle').value = '';
-  document.getElementById('newContent').value = '';
-  document.getElementById('newCategory').value = 'General';
-  document.getElementById('newPinned').checked = false;
-  document.getElementById('newLinkUrl').value = '';
-  document.getElementById('newLinkTitle').value = '';
-  const s = document.getElementById('postSuccess');
-  s.style.display = 'block';
-  setTimeout(() => s.style.display = 'none', 3500);
-  renderAll();
+  try {
+    await annCol.add(ann);
+    document.getElementById('newTitle').value = '';
+    document.getElementById('newContent').value = '';
+    document.getElementById('newCategory').value = 'General';
+    document.getElementById('newPinned').checked = false;
+    document.getElementById('newLinkUrl').value = '';
+    document.getElementById('newLinkTitle').value = '';
+    const s = document.getElementById('postSuccess');
+    s.style.display = 'block';
+    setTimeout(() => s.style.display = 'none', 3500);
+  } catch(e) {
+    alert('Could not post announcement. Please check your connection.');
+    console.error(e);
+  }
 }
 
-function deleteAnn(id) {
-  announcements = announcements.filter(a => a.id !== id);
-  saveData(); renderAll();
+async function deleteAnn(id) {
+  const ann = announcements.find(a => a.id === id);
+  if (ann && ann.docId) {
+    try { await annCol.doc(ann.docId).delete(); } catch(e) { console.error(e); }
+  }
 }
 
-function togglePin(id) {
-  announcements = announcements.map(a => a.id === id ? {...a, pinned:!a.pinned} : a);
-  saveData(); renderAll();
+async function togglePin(id) {
+  const ann = announcements.find(a => a.id === id);
+  if (ann && ann.docId) {
+    try { await annCol.doc(ann.docId).update({ pinned: !ann.pinned }); } catch(e) { console.error(e); }
+  }
 }
 
 function filterAnn(cat, btn) {
